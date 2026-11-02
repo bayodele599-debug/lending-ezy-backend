@@ -1,7 +1,16 @@
-# Lending Ezy — Backend
+# Lending Ezy Backend
 
-Sandbox-first API for illustrative amortization, product configuration, application workflow, and future lending-partner integrations.
+A sandbox-only global lending platform API. No live lending or financial transfers are enabled.
 
-**No real lending is enabled.** Regulatory, licensing, payment, authentication, underwriting, and accounting controls are not production-complete.
+## Local run
 
-Stack: FastAPI, Python, PostgreSQL-ready SQLAlchemy.
+```bash
+python -m venv .venv
+pip install -r requirements-dev.txt
+uvicorn app.main:app --reload
+pytest -q
+```
+
+Use an isolated development environment. `/docs` exposes the OpenAPI schema.
+
+**Safety:** illustrative rates and demo applications only; do not collect real identifying information or treat this as production-ready lending software.
