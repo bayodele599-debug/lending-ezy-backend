@@ -10,7 +10,7 @@ from app.main import app
 
 HEADERS = {"X-Admin-Key": os.environ["ADMIN_API_TOKEN"]}
 def payload():
-    return {"kind": "partner", "name": "Test Contact", "email": f"test-{uuid4().hex}@example.test",
+    return {"kind": "partner", "name": "Test Contact", "email": f"test-{uuid4().hex}@example.com",
             "country": "GB", "institution": "Sample Credit Ltd", "message": "Testing demo intake",
             "consent_to_contact": True}
 
