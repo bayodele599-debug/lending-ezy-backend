@@ -25,7 +25,9 @@ async def lifespan(app: FastAPI):
     yield
 
 app = FastAPI(title="Lending Ezy — Sandbox API", version="0.1.0", lifespan=lifespan)
-app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST"], allow_headers=["Content-Type"])
+app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "X-Admin-Key"])
+from .inquiries import router as inquiry_router
+app.include_router(inquiry_router)
 
 class QuoteRequest(BaseModel):
     product_id: str
