@@ -37,3 +37,5 @@ This application does **not** implement credit scoring, KYC, a binding credit de
 ### PostgreSQL access
 
 The financing-request tables use row-level security and revoke access from any Supabase-style \`anon\` and \`authenticated\` roles. The private server's database connection must be an authorised table owner or have explicit restrictive database policies. Never grant public Data API access to these personal-contact records. Do not create RLS policies allowing anonymous reads or writes; intake goes through the validated FastAPI endpoint.
+
+For VPS deployment configuration, see deploy/README.md (Contabo Compose, database migrations and encrypted backups).
