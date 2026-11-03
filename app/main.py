@@ -1,4 +1,4 @@
-"""Lending Ezy: sandbox only, with all live lending paths disabled."""
+"""Lending Ezy API: financing request intake, admin review, and isolated sandbox quotes."""
 from contextlib import asynccontextmanager
 from decimal import Decimal
 from typing import Annotated
@@ -24,10 +24,12 @@ async def lifespan(app: FastAPI):
         Base.metadata.create_all(bind=engine)  # Only for local development. Deploy migrations before production.
     yield
 
-app = FastAPI(title="Lending Ezy — Sandbox API", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="Lending Ezy API", version="0.2.0", lifespan=lifespan)
 app.add_middleware(CORSMiddleware, allow_origins=CORS_ORIGINS, allow_methods=["GET", "POST", "PATCH"], allow_headers=["Content-Type", "X-Admin-Key"])
 from .inquiries import router as inquiry_router
 app.include_router(inquiry_router)
+from .requests import router as financing_router
+app.include_router(financing_router)
 
 class QuoteRequest(BaseModel):
     product_id: str
