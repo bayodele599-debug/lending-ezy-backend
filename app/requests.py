@@ -20,7 +20,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from .db import Base, get_db
 from .finance import amortize
 from .inquiries import notify_admin, require_admin, verify_turnstile
-from .accounts import Customer, optional_customer, require_customer
+from .accounts import Customer, optional_customer, require_customer, deliver_email
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["financing requests"])
@@ -41,6 +41,21 @@ TRANSITIONS = {
 
 def now():
     return datetime.now(timezone.utc)
+
+
+def notify_customer(address: str, reference: str, kind: str):
+    """Generic email only. Never include internal notes, decisions or sensitive details."""
+    if not os.getenv("SMTP_HOST") or not os.getenv("SMTP_FROM"):
+        return
+    url = os.getenv("CUSTOMER_FRONTEND_URL", "http://localhost:3000").rstrip("/") + "/account"
+    try:
+        deliver_email(address, "A Lending Ezy request update",
+            "There is a new " + kind + " for your financing request (reference " +
+            reference[:8].upper() + "). Sign in to view it: " + url +
+            "\n\nThis is not a loan offer or credit approval.")
+    except Exception:
+        logger.warning("Customer notification delivery failed; no sensitive details logged")
+
 
 
 class FinancingRequest(Base):
@@ -291,6 +306,8 @@ def submit_financing_request(data: RequestInput, request: Request, tasks: Backgr
     db.commit()
     db.refresh(item)
     tasks.add_task(notify_admin, item.id, "financing request")
+    if customer:
+        tasks.add_task(notify_customer, customer.email, item.id, "receipt")
     return {"received": True, "reference": item.id, "status": "submitted"}
 
 
@@ -326,7 +343,7 @@ def request_detail(request_id: UUID, db: Session = Depends(get_db)):
 
 
 @router.patch("/admin/financing-requests/{request_id}", dependencies=[Depends(require_admin)])
-def review_request(request_id: UUID, data: ReviewInput, db: Session = Depends(get_db)):
+def review_request(request_id: UUID, data: ReviewInput, tasks: BackgroundTasks, db: Session = Depends(get_db)):
     item = db.get(FinancingRequest, str(request_id))
     if item is None:
         raise HTTPException(404, "Financing request not found")
@@ -347,6 +364,8 @@ def review_request(request_id: UUID, data: ReviewInput, db: Session = Depends(ge
     db.add(RequestEvent(request_id=item.id, old_status=previous, new_status=data.status,
                         actor="admin", note=data.note))
     db.commit()
+    if item.customer_id:
+        tasks.add_task(notify_customer, item.email, item.id, "status update")
     return {"reference": item.id, "status": data.status, "previous_status": previous, "updated_at": stamp.isoformat()}
 
 
@@ -372,12 +391,14 @@ def customer_messages(request_id: UUID, customer: Customer = Depends(require_cus
 
 
 @router.post("/account/requests/{request_id}/messages", status_code=201)
-def customer_reply(request_id: UUID, payload: MessageInput,
+def customer_reply(request_id: UUID, payload: MessageInput, tasks: BackgroundTasks,
                    customer: Customer = Depends(require_customer), db: Session = Depends(get_db)):
     item = require_owned_request(db, customer, request_id)
     if item.status == "closed":
         raise HTTPException(409, "This request is closed")
-    return append_message(db, item, "customer", payload.body)
+    result = append_message(db, item, "customer", payload.body)
+    tasks.add_task(notify_admin, item.id, "financing message")
+    return result
 
 
 @router.get("/admin/financing-requests/{request_id}/messages", dependencies=[Depends(require_admin)])
@@ -393,10 +414,13 @@ def admin_messages(request_id: UUID, db: Session = Depends(get_db)):
 
 @router.post("/admin/financing-requests/{request_id}/messages",
              status_code=201, dependencies=[Depends(require_admin)])
-def admin_reply(request_id: UUID, payload: MessageInput, db: Session = Depends(get_db)):
+def admin_reply(request_id: UUID, payload: MessageInput, tasks: BackgroundTasks,
+                db: Session = Depends(get_db)):
     item = db.get(FinancingRequest, str(request_id))
     if not item:
         raise HTTPException(404, "Request not found")
     if item.customer_id is None:
         raise HTTPException(409, "This request was submitted without a customer account; use the contact inbox")
-    return append_message(db, item, "admin", payload.body)
+    result = append_message(db, item, "admin", payload.body)
+    tasks.add_task(notify_customer, item.email, item.id, "message")
+    return result
