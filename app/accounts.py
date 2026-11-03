@@ -429,3 +429,28 @@ def remove_plan(plan_id: UUID, customer: Customer = Depends(require_customer),
     db.delete(row)
     db.commit()
     return {"deleted": True}
+
+
+
+@router.get("/export")
+def export_account(customer: Customer = Depends(require_customer),
+                   db: Session = Depends(get_db)):
+    """Explicit subject-access download; excludes secrets and staff-only notes."""
+    from .requests import FinancingRequest, RequestMessage, public_summary, visible_message
+    plans = db.scalars(select(CustomerPlan).where(CustomerPlan.customer_id == customer.id)
+                       .order_by(CustomerPlan.created_at.desc())).all()
+    cases = db.scalars(select(FinancingRequest).where(
+        FinancingRequest.customer_id == customer.id)
+        .order_by(FinancingRequest.created_at.desc())).all()
+    items = []
+    for case in cases:
+        visible = db.scalars(select(RequestMessage).where(
+            RequestMessage.request_id == case.id)
+            .order_by(RequestMessage.created_at.asc())).all()
+        items.append({"request": public_summary(case),
+                      "conversation": [visible_message(message) for message in visible]})
+    return {"exported_at": now().isoformat(),
+            "account": public_customer(customer),
+            "account_plans": [public_plan(plan) for plan in plans],
+            "account_linked_requests": items,
+            "notice": "Browser-only plans and anonymous submissions are not included. Internal staff notes are not part of the customer conversation."}

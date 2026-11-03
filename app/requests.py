@@ -424,3 +424,23 @@ def admin_reply(request_id: UUID, payload: MessageInput, tasks: BackgroundTasks,
     result = append_message(db, item, "admin", payload.body)
     tasks.add_task(notify_customer, item.email, item.id, "message")
     return result
+
+
+
+@router.get("/admin/financing-metrics", dependencies=[Depends(require_admin)])
+def financing_metrics(days: int = 30, db: Session = Depends(get_db)):
+    """Actual queue metrics. No simulated approvals or synthetic rates."""
+    days = max(1, min(365, days))
+    since = now() - timedelta(days=days)
+    total = db.scalar(select(func.count(FinancingRequest.id))) or 0
+    recent = db.scalar(select(func.count(FinancingRequest.id)).where(
+        FinancingRequest.created_at >= since)) or 0
+    per_status = db.execute(select(FinancingRequest.status, func.count(FinancingRequest.id))
+        .group_by(FinancingRequest.status)).all()
+    per_kind = db.execute(select(FinancingRequest.kind, func.count(FinancingRequest.id))
+        .group_by(FinancingRequest.kind)).all()
+    needs_attention = sum(count for state, count in per_status
+                          if state in {"submitted", "in_review", "needs_information"})
+    return {"total": total, "recent": recent, "period_days": days,
+            "attention": needs_attention, "by_status": dict(per_status),
+            "by_type": dict(per_kind), "generated_at": now().isoformat()}
