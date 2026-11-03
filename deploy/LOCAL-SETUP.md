@@ -25,3 +25,34 @@ To re-run only the synthetic HTTP smoke test when services are already running, 
 Use dummy names and email addresses only in the local development stack. Production credentials and live personal data must never be used in this test environment.
 
 Automated CI runs the same backend HTTP smoke test against a disposable PostgreSQL 16 service. It does not access your Windows files or Contabo host.
+
+
+## Customer accounts and private case messaging (local only)
+
+The local launcher now also starts **Mailpit**, a private disposable email inbox.
+It enables customer account features in local development, while production
+feature flags remain disabled by default. No emails are sent to external users.
+
+1. Open http://127.0.0.1:3000/account and register with a synthetic email.
+2. Open http://127.0.0.1:8025 to find your verification link.
+3. Verify the email, sign in, and create an account plan or explicitly import
+   local browser plans. They are stored in PostgreSQL, not browser storage.
+4. With the account signed in, submit a plan from My Plans. The same verified
+   email must be used to link the request to the account.
+5. Sign into the admin at http://127.0.0.1:3001/requests, review that case, and
+   send a customer-visible message from the Conversation panel.
+6. Open the customer account's Requests section to reply; internal admin notes
+   are never shown in the customer's message thread.
+7. Test password-reset links through Mailpit.
+
+Anonymous requests submitted before registration do not automatically attach
+to an account, even when their email address matches. Use an authenticated
+submission to make a linked case.
+
+The Windows launch scripts start and stop only this workspace's own services;
+the database volume persists between runs. Never use personal borrower data
+for local testing, and never expose Mailpit outside loopback.
+
+Customer account services require SMTP and privacy/retention policy review
+before production launch; neither the preview UI nor backend API is production
+enabled by merely merging this code.

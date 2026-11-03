@@ -11,6 +11,6 @@ if (Test-Path $stateFile) {
 }
 $secretFile = Join-Path $root '.env.local.test'
 if (Test-Path $secretFile) {
-  & docker compose --env-file $secretFile -f (Join-Path $root 'deploy\compose.local.yml') stop db
+  & docker compose --env-file $secretFile -f (Join-Path $root 'deploy\compose.local.yml') stop db mailpit
 }
 Write-Host 'Lending Ezy local processes stopped. PostgreSQL test data has been preserved.'

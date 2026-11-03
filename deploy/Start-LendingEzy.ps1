@@ -87,13 +87,13 @@ $dbPassword = Load-Secret 'POSTGRES_PASSWORD'
 $adminToken = Load-Secret 'ADMIN_API_TOKEN'
 $sessionSecret = Load-Secret 'ADMIN_SESSION_SECRET'
 $adminPassword = Load-Secret 'ADMIN_PASSWORD'
-foreach ($port in @(3000, 3001, 8000)) {
+foreach ($port in @(3000, 3001, 8000, 1025, 8025)) {
   if (Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue) {
     throw "Local port $port is already in use. Don't stop unrelated services automatically."
   }
 }
 Write-Host 'Creating a dedicated persistent PostgreSQL 16 database...'
-& docker compose --env-file $secrets -f $compose up -d db
+& docker compose --env-file $secrets -f $compose up -d db mailpit
 Assert-Exit 'PostgreSQL startup'
 Write-Host 'Applying database migrations...'
 & docker compose --env-file $secrets -f $compose --profile ops run --rm migrate
@@ -130,6 +130,9 @@ NEXT_PUBLIC_API_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_FINANCING_REQUESTS_ENABLED=true
 NEXT_PUBLIC_INQUIRIES_ENABLED=true
 NEXT_PUBLIC_TURNSTILE_SITE_KEY=
+INTERNAL_API_URL=http://127.0.0.1:8000
+CUSTOMER_PORTAL_ENABLED=true
+NEXT_PUBLIC_CUSTOMER_PORTAL_ENABLED=true
 "@
 Generated-Env (Join-Path $admin '.env.local') @"
 INTERNAL_API_URL=http://127.0.0.1:8000
@@ -141,6 +144,12 @@ $env:APP_ENV = 'development'
 $env:ENABLE_SANDBOX = 'false'
 $env:PUBLIC_INQUIRIES_ENABLED = 'true'
 $env:PUBLIC_FINANCING_REQUESTS_ENABLED = 'true'
+$env:CUSTOMER_ACCOUNTS_ENABLED = 'true'
+$env:CUSTOMER_FRONTEND_URL = 'http://127.0.0.1:3000'
+$env:SMTP_HOST = '127.0.0.1'
+$env:SMTP_PORT = '1025'
+$env:SMTP_STARTTLS = 'false'
+$env:SMTP_FROM = 'Lending Ezy Dev <no-reply@localhost.test>'
 $env:DATABASE_URL = ('postgresql+psycopg://{0}:{1}@127.0.0.1:{2}/{3}' -f $dbUser,$dbPassword,$dbPort,$dbName)
 $env:ADMIN_API_TOKEN = $adminToken
 $env:CORS_ORIGINS = 'http://127.0.0.1:3000,http://localhost:3000,http://127.0.0.1:3001,http://localhost:3001'
@@ -156,11 +165,17 @@ if (-not $SkipSmoke) {
   Write-Host 'Testing live request storage and administrative status transitions...'
   & $python (Join-Path $root 'tests\live_smoke.py')
   Assert-Exit 'Integration smoke test'
+  Write-Host 'Testing customer email verification, persisted plans and two-way conversations...'
+  $env:MAILPIT_URL = 'http://127.0.0.1:8025'
+  & $python (Join-Path $root 'tests\live_account_smoke.py')
+  Assert-Exit 'Customer account integration smoke test'
 }
 Write-Host 'Lending Ezy local stack is ready.' -ForegroundColor Green
 Write-Host 'Customer: http://127.0.0.1:3000'
 Write-Host 'Admin:    http://127.0.0.1:3001/requests'
 Write-Host 'API:      http://127.0.0.1:8000/docs'
 Write-Host 'DB:       127.0.0.1:55432'
+Write-Host 'Account:  http://127.0.0.1:3000/account'
+Write-Host 'Test inbox: http://127.0.0.1:8025 (Mailpit; no real email sent)'
 Write-Host ("Local admin password: " + $adminPassword)
 Write-Host 'Stop using the Stop-LendingEzy.ps1 script. Database data persists.'
