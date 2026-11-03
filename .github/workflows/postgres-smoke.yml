@@ -1,0 +1,71 @@
+name: PostgreSQL-backed local stack smoke test
+on:
+  pull_request:
+    paths:
+      - 'app/**'
+      - 'migrations/**'
+      - 'deploy/**'
+      - 'tests/live_smoke.py'
+      - '.github/workflows/postgres-smoke.yml'
+  workflow_dispatch:
+jobs:
+  live-postgres:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: lending_test
+          POSTGRES_PASSWORD: local_test_password_only
+          POSTGRES_DB: lending_local_test
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd 'pg_isready -U lending_test -d lending_local_test'
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      APP_ENV: development
+      ENABLE_SANDBOX: 'false'
+      DATABASE_URL: postgresql+psycopg://lending_test:local_test_password_only@127.0.0.1:55432/lending_local_test
+      PGHOST: 127.0.0.1
+      PGPORT: '55432'
+      PGUSER: lending_test
+      PGPASSWORD: local_test_password_only
+      PGDATABASE: lending_local_test
+      ADMIN_API_TOKEN: this_is_a_long_integration_test_admin_token_only
+      PUBLIC_FINANCING_REQUESTS_ENABLED: 'true'
+      PUBLIC_INQUIRIES_ENABLED: 'true'
+      CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements-dev.txt
+      - name: Apply real migrations
+        run: |
+          for file in migrations/*.sql; do
+            echo "Migrating: $file"
+            psql --set=ON_ERROR_STOP=1 --file "$file"
+          done
+      - name: Start FastAPI and verify HTTP readiness
+        run: |
+          python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/lending-ezy-api.log 2>&1 &
+          for i in {1..45}; do
+            if curl -fsS http://127.0.0.1:8000/health; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/lending-ezy-api.log
+          exit 1
+      - name: Submit, read, review and verify durable database state
+        run: python tests/live_smoke.py
+      - name: Preserve API log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: lending-ezy-postgres-api-log
+          path: /tmp/lending-ezy-api.log
+          if-no-files-found: warn
