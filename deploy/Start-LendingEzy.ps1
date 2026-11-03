@@ -165,6 +165,10 @@ if (-not $SkipSmoke) {
   Write-Host 'Testing live request storage and administrative status transitions...'
   & $python (Join-Path $root 'tests\live_smoke.py')
   Assert-Exit 'Integration smoke test'
+  Write-Host 'Testing customer email verification, persisted plans and two-way conversations...'
+  $env:MAILPIT_URL = 'http://127.0.0.1:8025'
+  & $python (Join-Path $root 'tests\live_account_smoke.py')
+  Assert-Exit 'Customer account integration smoke test'
 }
 Write-Host 'Lending Ezy local stack is ready.' -ForegroundColor Green
 Write-Host 'Customer: http://127.0.0.1:3000'
