@@ -32,3 +32,8 @@ Development creates tables automatically. Use a dedicated development database. 
 6. Configure optional SMTP notification/reply settings and document retention, data subject rights, backups, access controls, key rotation and incident procedures before collecting real names/emails.
 
 This application does **not** implement credit scoring, KYC, a binding credit decision, payments, disbursements, instalment collection, or lender authorisation. Internal status \`proceed_to_next_stage\` is not credit approval.
+
+
+### PostgreSQL access
+
+The financing-request tables use row-level security and revoke access from any Supabase-style \`anon\` and \`authenticated\` roles. The private server's database connection must be an authorised table owner or have explicit restrictive database policies. Never grant public Data API access to these personal-contact records. Do not create RLS policies allowing anonymous reads or writes; intake goes through the validated FastAPI endpoint.

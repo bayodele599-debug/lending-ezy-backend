@@ -141,7 +141,13 @@ def notify_admin(inquiry_id: str, kind: str):
     if not address or not smtp_available():
         return
     try:
-        send_mail(address, f"Lending Ezy: New {kind} enquiry", f"A new enquiry was received. Sign in to the admin inbox to review reference {inquiry_id}.")
+        if kind == "financing request":
+            subject = "Lending Ezy: New financing request"
+            body = f"A new financing request was received. Sign in to the financing review desk and open reference {inquiry_id}."
+        else:
+            subject = f"Lending Ezy: New {kind} enquiry"
+            body = f"A new enquiry was received. Sign in to the admin inbox to review reference {inquiry_id}."
+        send_mail(address, subject, body)
     except Exception:
         logger.exception("Inquiry admin notification failed for %s", inquiry_id)
 

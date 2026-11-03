@@ -39,3 +39,18 @@ CREATE TABLE IF NOT EXISTS financing_request_events (
     created_at TIMESTAMP WITH TIME ZONE NOT NULL
 );
 CREATE INDEX IF NOT EXISTS ix_financing_request_events_request_id ON financing_request_events(request_id);
+
+
+-- Defense in depth for managed Postgres installations that expose the public schema
+-- through a Data API. The server-side database owner can still access these tables.
+ALTER TABLE financing_requests ENABLE ROW LEVEL SECURITY;
+ALTER TABLE financing_request_events ENABLE ROW LEVEL SECURITY;
+DO $$
+DECLARE app_role TEXT;
+BEGIN
+  FOREACH app_role IN ARRAY ARRAY['anon','authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = app_role) THEN
+      EXECUTE format('REVOKE ALL ON TABLE financing_requests,financing_request_events FROM %I', app_role);
+    END IF;
+  END LOOP;
+END $$;
