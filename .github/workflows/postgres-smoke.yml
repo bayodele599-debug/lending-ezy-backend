@@ -53,6 +53,13 @@ jobs:
             echo "Migrating: $file"
             psql --set=ON_ERROR_STOP=1 --file "$file"
           done
+      - name: Validate local Compose database configuration
+        env:
+          POSTGRES_DB: lending_local_test
+          POSTGRES_USER: lending_test
+          POSTGRES_PASSWORD: local_test_password_only
+          POSTGRES_PORT: "55432"
+        run: docker compose -f deploy/compose.local.yml config --quiet
       - name: Start FastAPI and verify HTTP readiness
         run: |
           python -m uvicorn app.main:app --host 127.0.0.1 --port 8000 >/tmp/lending-ezy-api.log 2>&1 &
@@ -71,3 +78,22 @@ jobs:
           name: lending-ezy-postgres-api-log
           path: /tmp/lending-ezy-api.log
           if-no-files-found: warn
+
+  windows-scripts:
+    runs-on: windows-latest
+    timeout-minutes: 7
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate Windows PowerShell launcher scripts
+        shell: pwsh
+        run: |
+          foreach ($file in @("deploy/Start-LendingEzy.ps1","deploy/Stop-LendingEzy.ps1")) {
+            $tokens = $null
+            $issues = $null
+            [System.Management.Automation.Language.Parser]::ParseFile((Resolve-Path $file).Path,[ref]$tokens,[ref]$issues) | Out-Null
+            if ($issues.Count -gt 0) {
+              $issues | Format-List | Out-String | Write-Host
+              throw "$file contains syntax errors."
+            }
+            Write-Host "PowerShell syntax OK: $file"
+          }
