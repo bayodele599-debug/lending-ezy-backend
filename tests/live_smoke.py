@@ -22,7 +22,7 @@ payload = {
     "term_months": 36,
     "assumed_annual_rate": "8.00",
     "name": "Lending Ezy Local Test",
-    "email": f"test-{uuid.uuid4().hex}@example.test",
+    "email": f"test-{uuid.uuid4().hex}@example.com",
     "business_name": "Local Demonstration Ltd",
     "message": "Synthetic integration test; no real borrower",
     "consent_to_contact": True,
