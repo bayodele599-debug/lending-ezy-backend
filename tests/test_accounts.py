@@ -46,6 +46,13 @@ def test_accounts_password_reset_sessions_and_tenant_isolation(monkeypatch):
         plan_id = new.json()["id"]
         assert len(c.get("/api/v1/account/plans",headers=auth).json()["plans"]) == 1
         assert c.get("/api/v1/account/plans",headers=other_auth).json()["plans"] == []
+        export = c.get("/api/v1/account/export",headers=auth)
+        assert export.status_code == 200
+        assert len(export.json()["account_plans"]) == 1
+        assert export.json()["account"]["email"] == email
+        assert "password_digest" not in export.text and "token_digest" not in export.text
+        assert c.get("/api/v1/account/export",headers=other_auth).json()["account_plans"] == []
+        assert c.get("/api/v1/account/export").status_code == 401
         assert c.patch("/api/v1/account/plans/"+plan_id,headers=other_auth,json={
             "type":"business","purpose":"Equipment","country":"GB","currency":"GBP",
             "amount":35000,"months":36,"annual_rate":9}).status_code == 404

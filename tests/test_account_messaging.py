@@ -65,6 +65,14 @@ def test_customer_submission_thread_does_not_leak_private_notes(monkeypatch):
         assert thread.json()["messages"][0]["author"] == "admin"
         assert thread.json()["messages"][1]["author"] == "customer"
         assert "INTERNAL ONLY" not in str(thread.json())
+        export = client.get("/api/v1/account/export",headers=first)
+        assert export.status_code == 200
+        assert "INTERNAL ONLY" not in export.text
+        assert ref in export.text
+        metrics = client.get("/api/v1/admin/financing-metrics",headers=ADMIN)
+        assert metrics.status_code == 200 and metrics.json()["total"] >= 1
+        assert metrics.json()["attention"] >= 1
+        assert client.get("/api/v1/admin/financing-metrics").status_code == 401
         assert "INTERNAL ONLY" in str(client.get(
             "/api/v1/admin/financing-requests/"+ref,headers=ADMIN).json())
         assert client.get("/api/v1/admin/financing-requests/"+ref+"/messages",
