@@ -20,6 +20,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 from .db import Base, get_db
 from .finance import amortize
 from .inquiries import notify_admin, require_admin, verify_turnstile
+from .accounts import Customer, optional_customer, require_customer
 
 logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["financing requests"])
@@ -46,6 +47,7 @@ class FinancingRequest(Base):
     __tablename__ = "financing_requests"
     id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
     client_token: Mapped[str] = mapped_column(String(36), unique=True, nullable=False)
+    customer_id: Mapped[str | None] = mapped_column(ForeignKey("customers.id", ondelete="SET NULL"), nullable=True, index=True)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     email: Mapped[str] = mapped_column(String(254), nullable=False, index=True)
@@ -72,6 +74,15 @@ class RequestEvent(Base):
     new_status: Mapped[str] = mapped_column(String(32), nullable=False)
     actor: Mapped[str] = mapped_column(String(50), nullable=False)
     note: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now)
+
+
+class RequestMessage(Base):
+    __tablename__ = "financing_request_messages"
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=lambda: str(uuid4()))
+    request_id: Mapped[str] = mapped_column(ForeignKey("financing_requests.id", ondelete="CASCADE"), nullable=False, index=True)
+    author: Mapped[str] = mapped_column(String(20), nullable=False)
+    body: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=now)
 
 
@@ -140,6 +151,47 @@ class ReviewInput(BaseModel):
         return value
 
 
+class MessageInput(BaseModel):
+    body: str = Field(min_length=2, max_length=2000)
+
+    @field_validator("body")
+    @classmethod
+    def clean_body(cls, value: str):
+        value = value.strip()
+        if len(value) < 2:
+            raise ValueError("Message is too short")
+        return value
+
+
+def visible_message(msg: RequestMessage):
+    return {"id": msg.id, "author": msg.author, "body": msg.body,
+            "created_at": msg.created_at.isoformat()}
+
+
+def require_owned_request(db: Session, customer: Customer, request_id: UUID) -> FinancingRequest:
+    item = db.get(FinancingRequest, str(request_id))
+    if item is None or item.customer_id != customer.id:
+        raise HTTPException(404, "Request not found")
+    return item
+
+
+def append_message(db: Session, item: FinancingRequest, author: str, body: str):
+    recent = db.scalar(select(RequestMessage).where(
+        RequestMessage.request_id == item.id, RequestMessage.author == author)
+        .order_by(RequestMessage.created_at.desc()).limit(1))
+    if recent and recent.created_at.replace(tzinfo=timezone.utc) > now() - timedelta(seconds=5):
+        raise HTTPException(429, "Please allow a moment between messages")
+    count = db.scalar(select(func.count(RequestMessage.id)).where(
+        RequestMessage.request_id == item.id)) or 0
+    if count >= 200:
+        raise HTTPException(409, "Message thread limit reached; contact support")
+    msg = RequestMessage(request_id=item.id, author=author, body=body)
+    db.add(msg)
+    db.commit()
+    db.refresh(msg)
+    return visible_message(msg)
+
+
 def normalize(data: RequestInput):
     """Canonical form for idempotency, excluding bot token and honeypot."""
     return {
@@ -195,11 +247,15 @@ def admin_summary(item: FinancingRequest):
 
 
 @router.post("/financing-requests", status_code=201)
-def submit_financing_request(data: RequestInput, request: Request, tasks: BackgroundTasks, db: Session = Depends(get_db)):
+def submit_financing_request(data: RequestInput, request: Request, tasks: BackgroundTasks,
+                             db: Session = Depends(get_db),
+                             customer: Customer | None = Depends(optional_customer)):
     if os.getenv("PUBLIC_FINANCING_REQUESTS_ENABLED", "false").lower() != "true":
         raise HTTPException(503, "Financing request intake is temporarily unavailable")
 
     fields = normalize(data)
+    if customer and customer.email != fields["email"]:
+        raise HTTPException(403, "Sign in with the same email used on this request")
     digest = digest_for(fields)
     token = str(data.client_token)
     existing = db.scalar(select(FinancingRequest).where(FinancingRequest.client_token == token))
@@ -221,7 +277,7 @@ def submit_financing_request(data: RequestInput, request: Request, tasks: Backgr
         raise HTTPException(429, "Please contact our team before submitting more requests")
 
     item = FinancingRequest(
-        client_token=token, payload_digest=digest,
+        client_token=token, payload_digest=digest, customer_id=customer.id if customer else None,
         kind=fields["kind"], purpose=fields["purpose"], country=fields["country"],
         currency=fields["currency"], amount=data.amount, term_months=data.term_months,
         assumed_annual_rate=data.assumed_annual_rate, name=fields["name"],
@@ -292,3 +348,55 @@ def review_request(request_id: UUID, data: ReviewInput, db: Session = Depends(ge
                         actor="admin", note=data.note))
     db.commit()
     return {"reference": item.id, "status": data.status, "previous_status": previous, "updated_at": stamp.isoformat()}
+
+
+
+# A logged-in customer sees only cases explicitly submitted with their bearer
+# token. Previously submitted anonymous cases are never claimed by matching email.
+@router.get("/account/requests")
+def account_requests(customer: Customer = Depends(require_customer), db: Session = Depends(get_db)):
+    rows = db.scalars(select(FinancingRequest).where(
+        FinancingRequest.customer_id == customer.id)
+        .order_by(FinancingRequest.created_at.desc()).limit(100)).all()
+    return {"requests": [public_summary(x) for x in rows]}
+
+
+@router.get("/account/requests/{request_id}/messages")
+def customer_messages(request_id: UUID, customer: Customer = Depends(require_customer),
+                      db: Session = Depends(get_db)):
+    item = require_owned_request(db, customer, request_id)
+    rows = db.scalars(select(RequestMessage).where(RequestMessage.request_id == item.id)
+                      .order_by(RequestMessage.created_at.asc())).all()
+    return {"messages": [visible_message(x) for x in rows],
+            "reference": item.id, "status": item.status}
+
+
+@router.post("/account/requests/{request_id}/messages", status_code=201)
+def customer_reply(request_id: UUID, payload: MessageInput,
+                   customer: Customer = Depends(require_customer), db: Session = Depends(get_db)):
+    item = require_owned_request(db, customer, request_id)
+    if item.status == "closed":
+        raise HTTPException(409, "This request is closed")
+    return append_message(db, item, "customer", payload.body)
+
+
+@router.get("/admin/financing-requests/{request_id}/messages", dependencies=[Depends(require_admin)])
+def admin_messages(request_id: UUID, db: Session = Depends(get_db)):
+    item = db.get(FinancingRequest, str(request_id))
+    if not item:
+        raise HTTPException(404, "Request not found")
+    rows = db.scalars(select(RequestMessage).where(RequestMessage.request_id == item.id)
+                      .order_by(RequestMessage.created_at.asc())).all()
+    return {"messages": [visible_message(x) for x in rows],
+            "reference": item.id, "has_customer_account": item.customer_id is not None}
+
+
+@router.post("/admin/financing-requests/{request_id}/messages",
+             status_code=201, dependencies=[Depends(require_admin)])
+def admin_reply(request_id: UUID, payload: MessageInput, db: Session = Depends(get_db)):
+    item = db.get(FinancingRequest, str(request_id))
+    if not item:
+        raise HTTPException(404, "Request not found")
+    if item.customer_id is None:
+        raise HTTPException(409, "This request was submitted without a customer account; use the contact inbox")
+    return append_message(db, item, "admin", payload.body)

@@ -33,6 +33,8 @@ jobs:
       ADMIN_API_TOKEN: this_is_a_long_integration_test_admin_token_only
       PUBLIC_FINANCING_REQUESTS_ENABLED: 'true'
       PUBLIC_INQUIRIES_ENABLED: 'true'
+      CUSTOMER_ACCOUNTS_ENABLED: 'true'
+      CUSTOMER_FRONTEND_URL: http://localhost:3000
       CORS_ORIGINS: http://localhost:3000,http://127.0.0.1:3000
     steps:
       - uses: actions/checkout@v4
