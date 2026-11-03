@@ -33,7 +33,7 @@ def register_verified(client, monkeypatch):
 def test_accounts_password_reset_sessions_and_tenant_isolation(monkeypatch):
     with TestClient(app) as c:
         email,password,auth,captures = register_verified(c,monkeypatch)
-        other_email,other_password,other_auth,_ = register_verified(c,monkeypatch)
+        other_email,other_password,other_auth,second_captures = register_verified(c,monkeypatch)
         assert c.get("/api/v1/account/me").status_code == 401
         own = c.get("/api/v1/account/me",headers=auth)
         assert own.status_code == 200 and own.json()["email"] == email
@@ -57,7 +57,7 @@ def test_accounts_password_reset_sessions_and_tenant_isolation(monkeypatch):
         assert updated.status_code == 200 and updated.json()["amount"] == "14000.00",updated.text
 
         assert c.post("/api/v1/account/password/request-reset",json={"email":email}).status_code == 200
-        reset = captures[-1]
+        reset = second_captures[-1]
         assert reset[0] == "reset"
         assert c.post("/api/v1/account/password/reset",json={
             "token":reset[1],"password":"A brand new secure passphrase!"}).status_code == 200
