@@ -1,0 +1,61 @@
+name: lending-ezy
+services:
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Required}
+      POSTGRES_USER: ${POSTGRES_USER:?Required}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Required}
+    volumes:
+      - lending_data:/var/lib/postgresql/data
+    networks: [private]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+  api:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ../.env.contabo
+    environment:
+      APP_ENV: production
+      ENABLE_SANDBOX: "false"
+    ports:
+      - "127.0.0.1:${API_LOOPBACK_PORT:-18080}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+    healthcheck:
+      test: ["CMD", "python", "-c", "from urllib.request import urlopen; assert urlopen('http://127.0.0.1:8000/health',timeout=5).status==200"]
+      interval: 30s
+      timeout: 6s
+      retries: 4
+  migrate:
+    image: postgres:16
+    profiles: ["ops"]
+    restart: "no"
+    environment:
+      PGHOST: db
+      PGDATABASE: ${POSTGRES_DB:?Required}
+      PGUSER: ${POSTGRES_USER:?Required}
+      PGPASSWORD: ${POSTGRES_PASSWORD:?Required}
+    volumes:
+      - ../migrations:/migrations:ro
+    entrypoint: ["/bin/sh", "-euc"]
+    command:
+      - 'for f in /migrations/*.sql; do psql -v ON_ERROR_STOP=1 -f "$$f"; done'
+    depends_on:
+      db:
+        condition: service_healthy
+    networks: [private]
+networks:
+  private:
+    driver: bridge
+volumes:
+  lending_data:
