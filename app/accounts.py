@@ -17,15 +17,16 @@ from urllib.parse import quote
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Header, HTTPException
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
 from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, select, func
 from sqlalchemy.orm import Mapped, Session, mapped_column
 from .config import APP_ENV
 from .db import Base, get_db
+from .planning_terms import SHORT_TERMS, MORTGAGE_TERMS, valid_plan_term
 
 router = APIRouter(prefix="/api/v1/account", tags=["customer accounts"])
 CURRENCIES = {"USD", "GBP", "EUR", "CAD", "AUD", "SGD", "NGN", "ZAR", "INR", "AED", "KES", "GHS"}
-TERMS = {6, 12, 18, 24, 36, 48, 60}
+TERMS = SHORT_TERMS | MORTGAGE_TERMS
 ITERATIONS = 390_000
 
 
@@ -163,6 +164,12 @@ class PlanInput(BaseModel):
         if value not in TERMS:
             raise ValueError("Unsupported repayment term")
         return value
+
+    @model_validator(mode="after")
+    def good_purpose_term(self):
+        if not valid_plan_term(self.type, self.purpose, self.months):
+            raise ValueError("Term is not supported for this financing purpose")
+        return self
 
 
 def public_customer(c):

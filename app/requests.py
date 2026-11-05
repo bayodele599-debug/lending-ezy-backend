@@ -19,6 +19,7 @@ from sqlalchemy.orm import Mapped, Session, mapped_column
 
 from .db import Base, get_db
 from .finance import amortize
+from .planning_terms import SHORT_TERMS, MORTGAGE_TERMS, valid_plan_term
 from .inquiries import notify_admin, require_admin, verify_turnstile
 from .accounts import Customer, optional_customer, require_customer, deliver_email
 
@@ -26,7 +27,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/v1", tags=["financing requests"])
 
 CURRENCIES = {"USD", "GBP", "EUR", "CAD", "AUD", "SGD", "NGN", "ZAR", "INR", "AED", "KES", "GHS"}
-TERMS = {6, 12, 18, 24, 36, 48, 60}
+TERMS = SHORT_TERMS | MORTGAGE_TERMS
 TYPES = Literal["personal", "business"]
 STATES = Literal["submitted", "in_review", "needs_information", "proceed_to_next_stage", "not_proceeding", "closed"]
 TRANSITIONS = {
@@ -147,6 +148,8 @@ class RequestInput(BaseModel):
             raise ValueError("Name and purpose are required")
         if not self.consent_to_contact or not self.confirms_estimate_only:
             raise ValueError("Consent and acknowledgement are required")
+        if not valid_plan_term(self.kind, self.purpose, self.term_months):
+            raise ValueError("Term is not supported for this financing purpose")
         if self.kind == "business" and (not self.business_name or len(self.business_name.strip()) < 2):
             raise ValueError("Business name is required")
         return self
