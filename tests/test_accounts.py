@@ -87,3 +87,32 @@ def test_public_access_remains_disabled_by_default(monkeypatch):
         assert c.post("/api/v1/account/register",json={
             "email":"test@example.com","password":"Some very long passphrase!",
             "full_name":"Test Account","country":"GB","consent_to_terms":True}).status_code == 503
+
+
+def test_customer_mortgage_plan_contract(monkeypatch):
+    with TestClient(app) as client:
+        _, _, auth, _ = register_verified(client, monkeypatch)
+        base = {
+            "type": "personal", "purpose": "Home purchase & mortgage",
+            "country": "US", "currency": "USD", "amount": "250000.00",
+            "months": 240, "annual_rate": "6.50"
+        }
+        created = client.post("/api/v1/account/plans", headers=auth, json=base)
+        assert created.status_code == 201, created.text
+        plan_id = created.json()["id"]
+        plans = client.get("/api/v1/account/plans", headers=auth).json()["plans"]
+        assert any(x["id"] == plan_id and x["months"] == 240 for x in plans)
+
+        for change in (
+            {"purpose": "Education"},
+            {"type": "business", "purpose": "Home purchase & mortgage"},
+            {"months": 359},
+        ):
+            blocked = client.post("/api/v1/account/plans", headers=auth, json={**base, **change})
+            assert blocked.status_code == 422, blocked.text
+        blocked_edit = client.patch(
+            f"/api/v1/account/plans/{plan_id}", headers=auth,
+            json={**base, "purpose": "Education"}
+        )
+        assert blocked_edit.status_code == 422, blocked_edit.text
+        assert client.get("/api/v1/account/plans", headers=auth).json()["plans"][0]["months"] == 240
