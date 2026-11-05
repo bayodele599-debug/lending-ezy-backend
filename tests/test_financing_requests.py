@@ -1,6 +1,7 @@
 """Intake and admin review contract for financing requests."""
 import os
 from uuid import uuid4
+from decimal import Decimal
 
 os.environ["APP_ENV"] = "development"
 os.environ["ENABLE_SANDBOX"] = "true"
@@ -110,3 +111,28 @@ def test_rate_limit_and_no_public_details():
             ids.append(r.json()["reference"])
         assert client.post("/api/v1/financing-requests", json=new_payload(email=email)).status_code == 429
         assert client.get(f"/api/v1/financing-requests/{ids[0]}").status_code == 404
+
+
+def test_home_purchase_mortgage_terms_are_allowed_only_for_personal_requests():
+    with TestClient(app) as client:
+        data = new_payload(
+            kind="personal", purpose="Home purchase & mortgage",
+            business_name=None, amount="250000.00", term_months=240
+        )
+        result = client.post("/api/v1/financing-requests", json=data)
+        assert result.status_code == 201, result.text
+        ref = result.json()["reference"]
+        detail = client.get(f"/api/v1/admin/financing-requests/{ref}", headers=ADMIN)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["request"]["term_months"] == 240
+        assert Decimal(detail.json()["request"]["estimate"]["monthly_payment"]) > 0
+        # Generic consumer/business plans must not silently acquire 30-year terms.
+        for change in (
+            {"purpose": "Education"},
+            {"kind": "business", "business_name": "Example Ltd"},
+            {"term_months": 359},
+        ):
+            blocked = client.post("/api/v1/financing-requests", json=new_payload(
+                **{**data, **change, "client_token": str(uuid4())}
+            ))
+            assert blocked.status_code == 422, blocked.text
